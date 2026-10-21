@@ -6,5 +6,5 @@ minimumReleaseAgeExclude:
 
 allowBuilds:
   '@firebase/util': true
-  '@parcel/watcher': set this to true or false
+  '@parcel/watcher': true
   protobufjs: true
