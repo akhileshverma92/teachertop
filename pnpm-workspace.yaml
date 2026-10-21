@@ -1,0 +1,10 @@
+pmOnFail: ignore
+
+minimumReleaseAgeExclude:
+  - '@next/*'
+  - next
+
+allowBuilds:
+  '@firebase/util': true
+  '@parcel/watcher': set this to true or false
+  protobufjs: true

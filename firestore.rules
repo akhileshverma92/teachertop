@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userExists() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        (request.auth.token.email is string
+          && request.auth.token.email.matches('(?i)akkupatel055@gmail\\.com'))
+        || (userExists() && userDoc().role == 'admin')
+      );
+    }
+
+    function dailyAllowance(countField, dayField) {
+      return (
+        request.resource.data.get(countField, 0) == resource.data.get(countField, 0)
+        && request.resource.data.get(dayField, '') == resource.data.get(dayField, '')
+      ) || (
+        request.resource.data.get(countField, -1) is int
+        && request.resource.data.get(countField, -1) >= 0
+        && request.resource.data.get(countField, -1) <= 10
+        && request.resource.data.get(dayField, '') is string
+        && request.resource.data.get(dayField, '').size() > 0
+        && (
+          request.resource.data.get(dayField, '') != resource.data.get(dayField, '')
+          || request.resource.data.get(countField, 0) == resource.data.get(countField, 0) + 1
+        )
+      );
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create: if isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.votesUsed == 0
+        && request.resource.data.role in ['student', 'admin'];
+      allow update: if isSelf(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.get('votesUsed', 0) == resource.data.get('votesUsed', 0)
+        && dailyAllowance('boostsToday', 'boostDay')
+        && dailyAllowance('commentsToday', 'commentDay');
+      allow delete: if false;
+    }
+
+    match /teachers/{teacherId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['community', 'votes', 'support', 'updatedAt'])
+      );
+    }
+
+    match /teachers/{teacherId}/comments/{commentId} {
+      allow read: if true;
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['teacherId', 'userId', 'displayName', 'text', 'createdAt'])
+        && request.resource.data.teacherId == teacherId
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.displayName.size() <= 60
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 400
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /teachers/{teacherId}/commenters/{userId} {
+      allow read: if isSelf(userId) || isAdmin();
+      allow create, update: if isSelf(userId)
+        && request.resource.data.userId == userId;
+      allow delete: if false;
+    }
+
+    match /votes/{voteId} {
+      allow read: if signedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if signedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasAll(['userId', 'teacherId', 'createdAt']);
+      allow update, delete: if false;
+    }
+
+    match /likes/{likeId} {
+      allow read: if signedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if signedIn()
+        && likeId == request.auth.uid + '_' + request.resource.data.teacherId
+        && request.resource.data.keys().hasOnly(['userId', 'teacherId', 'createdAt', 'day'])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.teacherId is string
+        && request.resource.data.day is string;
+      allow delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow update: if false;
+    }
+  }
+}
